@@ -1,0 +1,42 @@
+Debug on, Displaying: Symbols, GPRs, TRAM, Instructions, 
+symbol: C_0              0x040 Type: Equate
+symbol: C_1              0x041 Type: Equate
+symbol: C_2              0x042 Type: Equate
+symbol: C_3              0x043 Type: Equate
+symbol: C_4              0x044 Type: Equate
+symbol: C_8              0x045 Type: Equate
+symbol: C_16             0x046 Type: Equate
+symbol: C_32             0x047 Type: Equate
+symbol: C_256            0x048 Type: Equate
+symbol: C_65536          0x049 Type: Equate
+symbol: C_2^23           0x04a Type: Equate
+symbol: C_2^28           0x04b Type: Equate
+symbol: C_2^29           0x04c Type: Equate
+symbol: C_2^30           0x04d Type: Equate
+symbol: C_nmax           0x04e Type: Equate
+symbol: C_max            0x04f Type: Equate
+symbol: C_n1             0x050 Type: Equate
+symbol: C_n2             0x051 Type: Equate
+symbol: C_n2^30          0x052 Type: Equate
+symbol: C_LSshift        0x055 Type: Equate
+symbol: ZERO             0x040 Type: Equate
+symbol: ONE              0x041 Type: Equate
+symbol: ACCUM            0x056 Type: Equate
+symbol: CCR              0x057 Type: Equate
+symbol: NOISE1           0x058 Type: Equate
+symbol: NOISE2           0x059 Type: Equate
+symbol: IRQ              0x05a Type: Equate
+symbol: DBAC             0x05b Type: Equate
+Patch name:"Vibro Effect"
+GPR:    in               0x100 Value=0x00000000, Type: Input
+GPR:    in.o             0x101 Value=0x00000000, Type: Output
+symbol: out              0x100 Type: Equate
+GPR:    delta            0x102 Value=0x003126e9, Type: Control
+GPR:    cosx             0x103 Value=0x3fffffff, Type: Static
+GPR:    sinx             0x104 Value=0x00000000, Type: Static
+GPR:    depth            0x105 Value=0x7fffffff, Type: Control
+GPR:    sin2             0x106 Value=0x00000000, Type: Dynamic
+0x000	MACS(0)  	0x104,0x104,0x102,0x103
+0x002	MACS1(1)  	0x103,0x103,0x102,0x104
+0x004	MACS(0)  	0x106,0x04d,0x104,0x105
+0x006	MACS(0)  	0x101,0x040,0x100,0x106

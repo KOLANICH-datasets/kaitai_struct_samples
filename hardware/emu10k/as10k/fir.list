@@ -1,0 +1,193 @@
+                                                   ||   ;;; low pass filter with cut off at 0.004pi (96Hz)
+                                                   ||   	name "trebass"
+                                                   ||   	
+including file                                     ||   	include "emu_constants.asm"
+                                                   ||   ;some hardware constants C_[n]<DecimalValue>, 'n' indicates negative value
+                                                   ||   ;		
+                                                   ||   ;these are in 2's complement representation
+                                                   ||    
+                                                   ||   C_0	equ $040	;;00000000
+                                                   ||   C_1	equ $041	;;00000001
+                                                   ||   C_2	equ $042	;;00000002
+                                                   ||   C_3	equ $043	;;00000003
+                                                   ||   C_4	equ $044	;;00000004	
+                                                   ||   C_8	equ $045	;;00000008
+                                                   ||   C_16	equ $046	;;00000010
+                                                   ||   C_32	equ $047	;;00000020
+                                                   ||   C_256	equ $048	;;00000100
+                                                   ||   C_65536 equ $049	;;00010000
+                                                   ||   C_2^23 	equ $04A	;;00080000
+                                                   ||   C_2^28	equ $04b	;;10000000
+                                                   ||   C_2^29	equ $04c	;;20000000 (C_max /4) +1
+                                                   ||   C_2^30	equ $04d	;;40000000 ( C_max / 2 ) + 1 (almost half)	
+                                                   ||   C_nmax	equ $04e	;;80000000 most negative number
+                                                   ||   C_max	equ $04f	;;7fffffff most positive number	
+                                                   ||   C_n1	equ $050	;;ffffffff -1
+                                                   ||   C_n2	equ $051	;;fffffffe -2
+                                                   ||   C_n2^30	equ $052	;;c0000000 C_nmax /2
+                                                   ||   
+                                                   ||   C_LSshift equ $55	;;to left shift an address by using macsints
+                                                   ||   			;;for fractional addresses
+                                                   ||   
+                                                   ||   
+                                                   ||   ZERO equ C_0;
+                                                   ||   ONE equ	C_1;
+                                                   ||   	
+                                                   ||   ;;; Hardware Registers:	
+                                                   ||   		
+                                                   ||   ACCUM	equ $56
+                                                   ||   CCR	equ $57	
+                                                   ||   NOISE1	equ $58
+                                                   ||   NOISE2	equ $59	
+                                                   ||   IRQ	equ $5A	
+                                                   ||   DBAC	equ $5B	
+                                                   ||   	
+                                                   ||   and	macro	dest,srcA,srcB
+                                                   ||   	andxor	dest,srcA,srcB,C_0
+                                                   ||   	endm
+                                                   ||   	
+                                                   ||   xor	macro   dest,srcA,srcB
+                                                   ||   	andxor	dest,C_n1,srcA,srcB
+                                                   ||   	endm
+                                                   ||   	
+                                                   ||   not	macro	 dest,src
+                                                   ||   	andxor   dest,src,C_n1,C_n1		
+                                                   ||   	endm
+                                                   ||   
+                                                   ||   nand	macro	dest,srcA,srcB	
+                                                   ||   	andxor	dest,srcA,srcB,C_n1
+                                                   ||   	endm
+                                                   ||   	
+                                                   ||   or	macro	 dest,srcA,srcB
+                                                   ||   	not	 C_0,srcA
+                                                   ||   	andxor	 dest,ACCUM,srcA,srcB	
+                                                   ||   	endm	
+                                                   ||   
+                                                   ||   nor	macro	dest,srcA,scrB
+                                                   ||   	not	dest,srcA
+                                                   ||   	andxor	dest,srcB,dest,srcA	
+                                                   ||   	not	dest,dest
+                                                   ||   	endm
+                                                   ||   
+                                                   ||   
+                                                   ||   neg     macro   dest,src
+                                                   ||   	macs1   dest,C_0,C_1,C_nmax 	
+                                                   ||   	endm	
+                                                   ||   	
+                                                   ||   ;;; branch on:
+                                                   ||   ;;; ==0
+                                                   ||   beq	macro   count
+                                                   ||   	skip	CCR,CCR,C_8,count	
+                                                   ||   	endm
+                                                   ||   ;;; !=0
+                                                   ||   bne	macro	count
+                                                   ||   	skip	CCR,CCR,C_256,count
+                                                   ||   	endm
+                                                   ||   ;;; <0
+                                                   ||   blt	macro	count
+                                                   ||   	skip	CCR,CCR,C_4,count
+                                                   ||   	endm
+                                                   ||   ;;; always branch
+                                                   ||   bra	macro	count
+                                                   ||   	skip	C_0,C_max,C_max,count
+                                                   ||   	endm
+                                                   ||   ;;; on saturation
+                                                   ||   bsa     macro count
+                                                   ||   	skip CCR,CCR,C_16,count
+                                                   ||   	endm
+                                                   ||   bge	macro  count
+                                                   ||   C___80	con $80
+                                                   ||   	skip CCR,CCR,C___80,count	
+                                                   ||   	endm
+                                                   ||   		
+                                                   ||   bgt	macro	count
+                                                   ||   C___180	con $180
+                                                   ||   	skip CCR,CCR,C___180,count
+                                                   ||   	endm
+                                                   ||   	
+                                                   ||   move	macro dest,src
+                                                   ||   	macs  dest,src,C_0,C_0
+                                                   ||   	endm	 	
+                                                   ||   	
+Exiting included file                              ||   	end
+                                                   ||   	
+                                                   ||   coef con 0.038684406  0.058115275  0.113007075  0.194116501  0.287525429  0.377072924  0.447195555  0.485671998  0.485783252 0.447503000  0.377505237  0.287987288  0.194517783  0.113292922  0.058289230  0.038818213
+                                                   ||   
+                                                   ||   
+                                                   ||   
+                                                   ||   n equ 15	; filter order
+                                                   ||   	
+                                                   ||   in	io
+                                                   ||   out equ in	
+                                                   ||   bass	control	0,0,#1
+                                                   ||   delay	sta 0,0,0,0,0 ,0,0,0,0,0 ,0,0,0,0,0 ,0	
+                                                   ||   tmp  dyn
+                                                   ||   
+0x000   MACINTS  (04)   0x113,0x110,0x040,0x040    ||   	macints  delay,in,C_0,C_0
+                                                   ||   	
+                                                   ||   ;;;our filter for the left channel
+                                                   ||   
+0x002   MACS     (00)   0x040,0x040,0x040,0x040    ||   	macs  C_0,C_0,C_0,C_0	
+FOR LOOP                                           ||   	for i = n : 1
+0x004   MACMV    (07)   0x122,0x121,0x122,0x10f    ||   		macmv   delay+i,delay+i-1,delay+i,coef+i
+0x006   MACMV    (07)   0x121,0x120,0x121,0x10e    ||   		macmv   delay+i,delay+i-1,delay+i,coef+i
+0x008   MACMV    (07)   0x120,0x11f,0x120,0x10d    ||   		macmv   delay+i,delay+i-1,delay+i,coef+i
+0x00a   MACMV    (07)   0x11f,0x11e,0x11f,0x10c    ||   		macmv   delay+i,delay+i-1,delay+i,coef+i
+0x00c   MACMV    (07)   0x11e,0x11d,0x11e,0x10b    ||   		macmv   delay+i,delay+i-1,delay+i,coef+i
+0x00e   MACMV    (07)   0x11d,0x11c,0x11d,0x10a    ||   		macmv   delay+i,delay+i-1,delay+i,coef+i
+0x010   MACMV    (07)   0x11c,0x11b,0x11c,0x109    ||   		macmv   delay+i,delay+i-1,delay+i,coef+i
+0x012   MACMV    (07)   0x11b,0x11a,0x11b,0x108    ||   		macmv   delay+i,delay+i-1,delay+i,coef+i
+0x014   MACMV    (07)   0x11a,0x119,0x11a,0x107    ||   		macmv   delay+i,delay+i-1,delay+i,coef+i
+0x016   MACMV    (07)   0x119,0x118,0x119,0x106    ||   		macmv   delay+i,delay+i-1,delay+i,coef+i
+0x018   MACMV    (07)   0x118,0x117,0x118,0x105    ||   		macmv   delay+i,delay+i-1,delay+i,coef+i
+0x01a   MACMV    (07)   0x117,0x116,0x117,0x104    ||   		macmv   delay+i,delay+i-1,delay+i,coef+i
+0x01c   MACMV    (07)   0x116,0x115,0x116,0x103    ||   		macmv   delay+i,delay+i-1,delay+i,coef+i
+0x01e   MACMV    (07)   0x115,0x114,0x115,0x102    ||   		macmv   delay+i,delay+i-1,delay+i,coef+i
+0x020   MACMV    (07)   0x114,0x113,0x114,0x101    ||   		macmv   delay+i,delay+i-1,delay+i,coef+i
+FOR LOOP DONE                                      ||   	endfor
+                                                   ||   	
+0x022   MACS     (00)   0x123,0x056,0x113,0x100    ||   	macs tmp,ACCUM,delay,coef
+                                                   ||   
+0x024   MACS1    (01)   0x111,0x110,0x123,0x112    ||   	macs1 out,in,tmp,bass	
+                                                   ||   	
+                                                   ||   	end
+Summary:
+Patch name: "trebass"
+
+*****************************GPR******************************
+in IN: 0x110, OUT: 0x111
+GPR Dynamic:  0x123(tmp)
+GPR Static:  0x113(delay), Value:0x00000000
+GPR Static:  0x114(__NO_NAME), Value:0x00000000
+GPR Static:  0x115(__NO_NAME), Value:0x00000000
+GPR Static:  0x116(__NO_NAME), Value:0x00000000
+GPR Static:  0x117(__NO_NAME), Value:0x00000000
+GPR Static:  0x118(__NO_NAME), Value:0x00000000
+GPR Static:  0x119(__NO_NAME), Value:0x00000000
+GPR Static:  0x11a(__NO_NAME), Value:0x00000000
+GPR Static:  0x11b(__NO_NAME), Value:0x00000000
+GPR Static:  0x11c(__NO_NAME), Value:0x00000000
+GPR Static:  0x11d(__NO_NAME), Value:0x00000000
+GPR Static:  0x11e(__NO_NAME), Value:0x00000000
+GPR Static:  0x11f(__NO_NAME), Value:0x00000000
+GPR Static:  0x120(__NO_NAME), Value:0x00000000
+GPR Static:  0x121(__NO_NAME), Value:0x00000000
+GPR Static:  0x122(__NO_NAME), Value:0x00000000
+GPR Control: 0x112(bass), value:0x00000000, Min:0x00000000, Max:0x7fffffff
+GPR Constant: 0x100(coef), Value:0x04f39c51
+GPR Constant: 0x101(__NO_NAME), Value:0x07705242
+GPR Constant: 0x102(__NO_NAME), Value:0x0e77040d
+GPR Constant: 0x103(__NO_NAME), Value:0x18d8cf3b
+GPR Constant: 0x104(__NO_NAME), Value:0x24cda21c
+GPR Constant: 0x105(__NO_NAME), Value:0x3043ecf2
+GPR Constant: 0x106(__NO_NAME), Value:0x393db435
+GPR Constant: 0x107(__NO_NAME), Value:0x3e2a8001
+GPR Constant: 0x108(__NO_NAME), Value:0x3e2e2545
+GPR Constant: 0x109(__NO_NAME), Value:0x3947c73e
+GPR Constant: 0x10a(__NO_NAME), Value:0x30521773
+GPR Constant: 0x10b(__NO_NAME), Value:0x24dcc477
+GPR Constant: 0x10c(__NO_NAME), Value:0x18e5f56e
+GPR Constant: 0x10d(__NO_NAME), Value:0x0e8061e9
+GPR Constant: 0x10e(__NO_NAME), Value:0x07760580
+GPR Constant: 0x10f(__NO_NAME), Value:0x04f7fec5
+*****************************TRAM*****************************

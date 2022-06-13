@@ -1,0 +1,969 @@
+                                                   ||   	name  "5 band EQ"
+including file                                     ||   	include "emu_constants.asm"
+                                                   ||   ;some hardware constants C_[n]<DecimalValue>, 'n' indicates negative value
+                                                   ||   ;		
+                                                   ||   ;these are in 2's complement representation
+                                                   ||    
+                                                   ||   C_0	equ $040	;;00000000
+                                                   ||   C_1	equ $041	;;00000001
+                                                   ||   C_2	equ $042	;;00000002
+                                                   ||   C_3	equ $043	;;00000003
+                                                   ||   C_4	equ $044	;;00000004	
+                                                   ||   C_8	equ $045	;;00000008
+                                                   ||   C_16	equ $046	;;00000010
+                                                   ||   C_32	equ $047	;;00000020
+                                                   ||   C_256	equ $048	;;00000100
+                                                   ||   C_65536 equ $049	;;00010000
+                                                   ||   C_2^23 	equ $04A	;;00080000
+                                                   ||   C_2^28	equ $04b	;;10000000
+                                                   ||   C_2^29	equ $04c	;;20000000 (C_max /4) +1
+                                                   ||   C_2^30	equ $04d	;;40000000 ( C_max / 2 ) + 1 (almost half)	
+                                                   ||   C_nmax	equ $04e	;;80000000 most negative number
+                                                   ||   C_max	equ $04f	;;7fffffff most positive number	
+                                                   ||   C_n1	equ $050	;;ffffffff -1
+                                                   ||   C_n2	equ $051	;;fffffffe -2
+                                                   ||   C_n2^30	equ $052	;;c0000000 C_nmax /2
+                                                   ||   
+                                                   ||   C_LSshift equ $55	;;to left shift an address by using macsints
+                                                   ||   			;;for fractional addresses
+                                                   ||   
+                                                   ||   
+                                                   ||   ZERO equ C_0;
+                                                   ||   ONE equ	C_1;
+                                                   ||   	
+                                                   ||   ;;; Hardware Registers:	
+                                                   ||   		
+                                                   ||   ACCUM	equ $56
+                                                   ||   CCR	equ $57	
+                                                   ||   NOISE1	equ $58
+                                                   ||   NOISE2	equ $59	
+                                                   ||   IRQ	equ $5A	
+                                                   ||   DBAC	equ $5B	
+                                                   ||   	
+                                                   ||   and	macro	dest,srcA,srcB
+                                                   ||   	andxor	dest,srcA,srcB,C_0
+                                                   ||   	endm
+                                                   ||   	
+                                                   ||   xor	macro   dest,srcA,srcB
+                                                   ||   	andxor	dest,C_n1,srcA,srcB
+                                                   ||   	endm
+                                                   ||   	
+                                                   ||   not	macro	 dest,src
+                                                   ||   	andxor   dest,src,C_n1,C_n1		
+                                                   ||   	endm
+                                                   ||   
+                                                   ||   nand	macro	dest,srcA,srcB	
+                                                   ||   	andxor	dest,srcA,srcB,C_n1
+                                                   ||   	endm
+                                                   ||   	
+                                                   ||   or	macro	 dest,srcA,srcB
+                                                   ||   	not	 C_0,srcA
+                                                   ||   	andxor	 dest,ACCUM,srcA,srcB	
+                                                   ||   	endm	
+                                                   ||   
+                                                   ||   nor	macro	dest,srcA,scrB
+                                                   ||   	not	dest,srcA
+                                                   ||   	andxor	dest,srcB,dest,srcA	
+                                                   ||   	not	dest,dest
+                                                   ||   	endm
+                                                   ||   
+                                                   ||   
+                                                   ||   neg     macro   dest,src
+                                                   ||   	macs1   dest,C_0,C_1,C_nmax 	
+                                                   ||   	endm	
+                                                   ||   	
+                                                   ||   ;;; branch on:
+                                                   ||   ;;; ==0
+                                                   ||   beq	macro   count
+                                                   ||   	skip	CCR,CCR,C_8,count	
+                                                   ||   	endm
+                                                   ||   ;;; !=0
+                                                   ||   bne	macro	count
+                                                   ||   	skip	CCR,CCR,C_256,count
+                                                   ||   	endm
+                                                   ||   ;;; <0
+                                                   ||   blt	macro	count
+                                                   ||   	skip	CCR,CCR,C_4,count
+                                                   ||   	endm
+                                                   ||   ;;; always branch
+                                                   ||   bra	macro	count
+                                                   ||   	skip	C_0,C_max,C_max,count
+                                                   ||   	endm
+                                                   ||   ;;; on saturation
+                                                   ||   bsa     macro count
+                                                   ||   	skip CCR,CCR,C_16,count
+                                                   ||   	endm
+                                                   ||   bge	macro  count
+                                                   ||   C___80	con $80
+                                                   ||   	skip CCR,CCR,C___80,count	
+                                                   ||   	endm
+                                                   ||   		
+                                                   ||   bgt	macro	count
+                                                   ||   C___180	con $180
+                                                   ||   	skip CCR,CCR,C___180,count
+                                                   ||   	endm
+                                                   ||   	
+                                                   ||   move	macro dest,src
+                                                   ||   	macs  dest,src,C_0,C_0
+                                                   ||   	endm	 	
+                                                   ||   	
+Exiting included file                              ||   	end
+                                                   ||   
+                                                   ||   	
+                                                   ||   c0	con -0.98485626   0.98502633 0.99034926  -0.99034926
+                                                   ||   c1	con -0.95169465   0.95337028 0.93878619  -0.93878619
+                                                   ||   c2	con -0.84376963   0.85967945 0.84174451  -0.84174451
+                                                   ||   c3	con -0.47720462   0.61368058 0.73503304  -0.73503304
+                                                   ||   c4	con -0.28987550   0.11999291 0.72670869  -0.72670869
+                                                   ||   					
+                                                   ||   scalein sta  0.00013665  0.00134590  0.01265823  0.10000000  0.50000000
+                                                   ||   scaleout sta 420.00000000  140.00000000  50.00000000  20.00000000  10.00000000
+                                                   ||   
+                                                   ||   in	io
+                                                   ||   out equ in		
+                                                   ||   
+                                                   ||   F_100Hz control #0.2,0,#1	
+                                                   ||   F_316Hz control #0.1,0,#1	
+                                                   ||   F_1000Hz control #0.1,0,#1	
+                                                   ||   F_3160Hz control #0.1,0,#1	
+                                                   ||   F_10000Hz control #0.2,0,#1	
+                                                   ||   	
+                                                   ||   dly0 sta 0 0
+                                                   ||   dly1 sta 0 0
+                                                   ||   dly2 sta 0 0 
+                                                   ||   dly3 sta 0 0
+                                                   ||   dly4 sta  0 0	
+                                                   ||   				
+                                                   ||   out_tmp	dyn	
+                                                   ||   tmp2 dyn
+                                                   ||   tmp dyn
+                                                   ||   	
+                                                   ||   ;;; Band Pass Filter Macro:
+                                                   ||   BPF	macro   OUT , IN , DELAY , COEF , SCALEIN , SCALEOUT , FOO , GAIN
+                                                   ||   		macs  tmp,C_0,SCALEIN,IN
+                                                   ||   		macs1  tmp,tmp,DELAY,FOO
+                                                   ||    		macw1  tmp,tmp,DELAY,COEF
+                                                   ||   		macw1 tmp,tmp,DELAY+1,COEF+1
+                                                   ||   		macs	tmp2,C_0,DELAY+1,COEF+3
+                                                   ||   		macs	DELAY+1,DELAY,C_0,C_0
+                                                   ||   		macs	tmp2,tmp2,tmp,COEF+2
+                                                   ||   		macs	DELAY,tmp,C_0,C_0	
+                                                   ||   		macints  tmp2,C_0,tmp2,SCALEOUT
+                                                   ||   		macs	OUT,OUT,tmp2,GAIN
+                                                   ||   	endm
+                                                   ||   
+                                                   ||   	
+0x000   MACS     (00)   0x12f,0x040,0x040,0x040    ||   	macs out_tmp,C_0,C_0,C_0
+                                                   ||   
+		macs  tmp,C_0,SCALEIN,IN
+		macs1  tmp,tmp,DELAY,FOO
+ 		macw1  tmp,tmp,DELAY,COEF
+		macw1 tmp,tmp,DELAY+1,COEF+1
+		macs	tmp2,C_0,DELAY+1,COEF+3
+		macs	DELAY+1,DELAY,C_0,C_0
+		macs	tmp2,tmp2,tmp,COEF+2
+		macs	DELAY,tmp,C_0,C_0	
+		macints  tmp2,C_0,tmp2,SCALEOUT
+		macs	OUT,OUT,tmp2,GAIN
+	endm
+
+	
+	macs out_tmp,C_0,C_0,C_0
+	BPF  out_tmp,in,dly0,c0,scalein,scaleout,C_nmax,F_100Hz
+0x002   MACS     (00)   0x131,0x040,0x114,0x11e    ||   		macs  tmp,C_0,SCALEIN,IN
+		macs1  tmp,tmp,DELAY,FOO
+ 		macw1  tmp,tmp,DELAY,COEF
+		macw1 tmp,tmp,DELAY+1,COEF+1
+		macs	tmp2,C_0,DELAY+1,COEF+3
+		macs	DELAY+1,DELAY,C_0,C_0
+		macs	tmp2,tmp2,tmp,COEF+2
+		macs	DELAY,tmp,C_0,C_0	
+		macints  tmp2,C_0,tmp2,SCALEOUT
+		macs	OUT,OUT,tmp2,GAIN
+	endm
+
+	
+	macs out_tmp,C_0,C_0,C_0
+	BPF  out_tmp,in,dly0,c0,scalein,scaleout,C_nmax,F_100Hz
+0x004   MACS1    (01)   0x131,0x131,0x125,0x04e    ||   		macs1  tmp,tmp,DELAY,FOO
+ 		macw1  tmp,tmp,DELAY,COEF
+		macw1 tmp,tmp,DELAY+1,COEF+1
+		macs	tmp2,C_0,DELAY+1,COEF+3
+		macs	DELAY+1,DELAY,C_0,C_0
+		macs	tmp2,tmp2,tmp,COEF+2
+		macs	DELAY,tmp,C_0,C_0	
+		macints  tmp2,C_0,tmp2,SCALEOUT
+		macs	OUT,OUT,tmp2,GAIN
+	endm
+
+	
+	macs out_tmp,C_0,C_0,C_0
+	BPF  out_tmp,in,dly0,c0,scalein,scaleout,C_nmax,F_100Hz
+0x006   MACW1    (03)   0x131,0x131,0x125,0x100    ||    		macw1  tmp,tmp,DELAY,COEF
+		macw1 tmp,tmp,DELAY+1,COEF+1
+		macs	tmp2,C_0,DELAY+1,COEF+3
+		macs	DELAY+1,DELAY,C_0,C_0
+		macs	tmp2,tmp2,tmp,COEF+2
+		macs	DELAY,tmp,C_0,C_0	
+		macints  tmp2,C_0,tmp2,SCALEOUT
+		macs	OUT,OUT,tmp2,GAIN
+	endm
+
+	
+	macs out_tmp,C_0,C_0,C_0
+	BPF  out_tmp,in,dly0,c0,scalein,scaleout,C_nmax,F_100Hz
+0x008   MACW1    (03)   0x131,0x131,0x126,0x101    ||   		macw1 tmp,tmp,DELAY+1,COEF+1
+		macs	tmp2,C_0,DELAY+1,COEF+3
+		macs	DELAY+1,DELAY,C_0,C_0
+		macs	tmp2,tmp2,tmp,COEF+2
+		macs	DELAY,tmp,C_0,C_0	
+		macints  tmp2,C_0,tmp2,SCALEOUT
+		macs	OUT,OUT,tmp2,GAIN
+	endm
+
+	
+	macs out_tmp,C_0,C_0,C_0
+	BPF  out_tmp,in,dly0,c0,scalein,scaleout,C_nmax,F_100Hz
+0x00a   MACS     (00)   0x130,0x040,0x126,0x103    ||   		macs	tmp2,C_0,DELAY+1,COEF+3
+		macs	DELAY+1,DELAY,C_0,C_0
+		macs	tmp2,tmp2,tmp,COEF+2
+		macs	DELAY,tmp,C_0,C_0	
+		macints  tmp2,C_0,tmp2,SCALEOUT
+		macs	OUT,OUT,tmp2,GAIN
+	endm
+
+	
+	macs out_tmp,C_0,C_0,C_0
+	BPF  out_tmp,in,dly0,c0,scalein,scaleout,C_nmax,F_100Hz
+0x00c   MACS     (00)   0x126,0x125,0x040,0x040    ||   		macs	DELAY+1,DELAY,C_0,C_0
+		macs	tmp2,tmp2,tmp,COEF+2
+		macs	DELAY,tmp,C_0,C_0	
+		macints  tmp2,C_0,tmp2,SCALEOUT
+		macs	OUT,OUT,tmp2,GAIN
+	endm
+
+	
+	macs out_tmp,C_0,C_0,C_0
+	BPF  out_tmp,in,dly0,c0,scalein,scaleout,C_nmax,F_100Hz
+0x00e   MACS     (00)   0x130,0x130,0x131,0x102    ||   		macs	tmp2,tmp2,tmp,COEF+2
+		macs	DELAY,tmp,C_0,C_0	
+		macints  tmp2,C_0,tmp2,SCALEOUT
+		macs	OUT,OUT,tmp2,GAIN
+	endm
+
+	
+	macs out_tmp,C_0,C_0,C_0
+	BPF  out_tmp,in,dly0,c0,scalein,scaleout,C_nmax,F_100Hz
+0x010   MACS     (00)   0x125,0x131,0x040,0x040    ||   		macs	DELAY,tmp,C_0,C_0	
+		macints  tmp2,C_0,tmp2,SCALEOUT
+		macs	OUT,OUT,tmp2,GAIN
+	endm
+
+	
+	macs out_tmp,C_0,C_0,C_0
+	BPF  out_tmp,in,dly0,c0,scalein,scaleout,C_nmax,F_100Hz
+0x012   MACINTS  (04)   0x130,0x040,0x130,0x119    ||   		macints  tmp2,C_0,tmp2,SCALEOUT
+		macs	OUT,OUT,tmp2,GAIN
+	endm
+
+	
+	macs out_tmp,C_0,C_0,C_0
+	BPF  out_tmp,in,dly0,c0,scalein,scaleout,C_nmax,F_100Hz
+0x014   MACS     (00)   0x12f,0x12f,0x130,0x120    ||   		macs	OUT,OUT,tmp2,GAIN
+	endm
+
+	
+	macs out_tmp,C_0,C_0,C_0
+	BPF  out_tmp,in,dly0,c0,scalein,scaleout,C_nmax,F_100Hz
+                                                   ||   	endm
+
+	
+	macs out_tmp,C_0,C_0,C_0
+	BPF  out_tmp,in,dly0,c0,scalein,scaleout,C_nmax,F_100Hz
+                                                   ||   	BPF  out_tmp,in,dly0,c0,scalein,scaleout,C_nmax,F_100Hz
+                                                   ||   
+		macs  tmp,C_0,SCALEIN,IN
+		macs1  tmp,tmp,DELAY,FOO
+ 		macw1  tmp,tmp,DELAY,COEF
+		macw1 tmp,tmp,DELAY+1,COEF+1
+		macs	tmp2,C_0,DELAY+1,COEF+3
+		macs	DELAY+1,DELAY,C_0,C_0
+		macs	tmp2,tmp2,tmp,COEF+2
+		macs	DELAY,tmp,C_0,C_0	
+		macints  tmp2,C_0,tmp2,SCALEOUT
+		macs	OUT,OUT,tmp2,GAIN
+	endm
+
+	
+	macs out_tmp,C_0,C_0,C_0
+	BPF  out_tmp,in,dly0,c0,scalein,scaleout,C_nmax,F_100Hz
+	BPF  out_tmp,in,dly1,c1,scalein+1,scaleout+1,C_nmax,F_316Hz
+0x016   MACS     (00)   0x131,0x040,0x115,0x11e    ||   		macs  tmp,C_0,SCALEIN,IN
+		macs1  tmp,tmp,DELAY,FOO
+ 		macw1  tmp,tmp,DELAY,COEF
+		macw1 tmp,tmp,DELAY+1,COEF+1
+		macs	tmp2,C_0,DELAY+1,COEF+3
+		macs	DELAY+1,DELAY,C_0,C_0
+		macs	tmp2,tmp2,tmp,COEF+2
+		macs	DELAY,tmp,C_0,C_0	
+		macints  tmp2,C_0,tmp2,SCALEOUT
+		macs	OUT,OUT,tmp2,GAIN
+	endm
+
+	
+	macs out_tmp,C_0,C_0,C_0
+	BPF  out_tmp,in,dly0,c0,scalein,scaleout,C_nmax,F_100Hz
+	BPF  out_tmp,in,dly1,c1,scalein+1,scaleout+1,C_nmax,F_316Hz
+0x018   MACS1    (01)   0x131,0x131,0x127,0x04e    ||   		macs1  tmp,tmp,DELAY,FOO
+ 		macw1  tmp,tmp,DELAY,COEF
+		macw1 tmp,tmp,DELAY+1,COEF+1
+		macs	tmp2,C_0,DELAY+1,COEF+3
+		macs	DELAY+1,DELAY,C_0,C_0
+		macs	tmp2,tmp2,tmp,COEF+2
+		macs	DELAY,tmp,C_0,C_0	
+		macints  tmp2,C_0,tmp2,SCALEOUT
+		macs	OUT,OUT,tmp2,GAIN
+	endm
+
+	
+	macs out_tmp,C_0,C_0,C_0
+	BPF  out_tmp,in,dly0,c0,scalein,scaleout,C_nmax,F_100Hz
+	BPF  out_tmp,in,dly1,c1,scalein+1,scaleout+1,C_nmax,F_316Hz
+0x01a   MACW1    (03)   0x131,0x131,0x127,0x104    ||    		macw1  tmp,tmp,DELAY,COEF
+		macw1 tmp,tmp,DELAY+1,COEF+1
+		macs	tmp2,C_0,DELAY+1,COEF+3
+		macs	DELAY+1,DELAY,C_0,C_0
+		macs	tmp2,tmp2,tmp,COEF+2
+		macs	DELAY,tmp,C_0,C_0	
+		macints  tmp2,C_0,tmp2,SCALEOUT
+		macs	OUT,OUT,tmp2,GAIN
+	endm
+
+	
+	macs out_tmp,C_0,C_0,C_0
+	BPF  out_tmp,in,dly0,c0,scalein,scaleout,C_nmax,F_100Hz
+	BPF  out_tmp,in,dly1,c1,scalein+1,scaleout+1,C_nmax,F_316Hz
+0x01c   MACW1    (03)   0x131,0x131,0x128,0x105    ||   		macw1 tmp,tmp,DELAY+1,COEF+1
+		macs	tmp2,C_0,DELAY+1,COEF+3
+		macs	DELAY+1,DELAY,C_0,C_0
+		macs	tmp2,tmp2,tmp,COEF+2
+		macs	DELAY,tmp,C_0,C_0	
+		macints  tmp2,C_0,tmp2,SCALEOUT
+		macs	OUT,OUT,tmp2,GAIN
+	endm
+
+	
+	macs out_tmp,C_0,C_0,C_0
+	BPF  out_tmp,in,dly0,c0,scalein,scaleout,C_nmax,F_100Hz
+	BPF  out_tmp,in,dly1,c1,scalein+1,scaleout+1,C_nmax,F_316Hz
+0x01e   MACS     (00)   0x130,0x040,0x128,0x107    ||   		macs	tmp2,C_0,DELAY+1,COEF+3
+		macs	DELAY+1,DELAY,C_0,C_0
+		macs	tmp2,tmp2,tmp,COEF+2
+		macs	DELAY,tmp,C_0,C_0	
+		macints  tmp2,C_0,tmp2,SCALEOUT
+		macs	OUT,OUT,tmp2,GAIN
+	endm
+
+	
+	macs out_tmp,C_0,C_0,C_0
+	BPF  out_tmp,in,dly0,c0,scalein,scaleout,C_nmax,F_100Hz
+	BPF  out_tmp,in,dly1,c1,scalein+1,scaleout+1,C_nmax,F_316Hz
+0x020   MACS     (00)   0x128,0x127,0x040,0x040    ||   		macs	DELAY+1,DELAY,C_0,C_0
+		macs	tmp2,tmp2,tmp,COEF+2
+		macs	DELAY,tmp,C_0,C_0	
+		macints  tmp2,C_0,tmp2,SCALEOUT
+		macs	OUT,OUT,tmp2,GAIN
+	endm
+
+	
+	macs out_tmp,C_0,C_0,C_0
+	BPF  out_tmp,in,dly0,c0,scalein,scaleout,C_nmax,F_100Hz
+	BPF  out_tmp,in,dly1,c1,scalein+1,scaleout+1,C_nmax,F_316Hz
+0x022   MACS     (00)   0x130,0x130,0x131,0x106    ||   		macs	tmp2,tmp2,tmp,COEF+2
+		macs	DELAY,tmp,C_0,C_0	
+		macints  tmp2,C_0,tmp2,SCALEOUT
+		macs	OUT,OUT,tmp2,GAIN
+	endm
+
+	
+	macs out_tmp,C_0,C_0,C_0
+	BPF  out_tmp,in,dly0,c0,scalein,scaleout,C_nmax,F_100Hz
+	BPF  out_tmp,in,dly1,c1,scalein+1,scaleout+1,C_nmax,F_316Hz
+0x024   MACS     (00)   0x127,0x131,0x040,0x040    ||   		macs	DELAY,tmp,C_0,C_0	
+		macints  tmp2,C_0,tmp2,SCALEOUT
+		macs	OUT,OUT,tmp2,GAIN
+	endm
+
+	
+	macs out_tmp,C_0,C_0,C_0
+	BPF  out_tmp,in,dly0,c0,scalein,scaleout,C_nmax,F_100Hz
+	BPF  out_tmp,in,dly1,c1,scalein+1,scaleout+1,C_nmax,F_316Hz
+0x026   MACINTS  (04)   0x130,0x040,0x130,0x11a    ||   		macints  tmp2,C_0,tmp2,SCALEOUT
+		macs	OUT,OUT,tmp2,GAIN
+	endm
+
+	
+	macs out_tmp,C_0,C_0,C_0
+	BPF  out_tmp,in,dly0,c0,scalein,scaleout,C_nmax,F_100Hz
+	BPF  out_tmp,in,dly1,c1,scalein+1,scaleout+1,C_nmax,F_316Hz
+0x028   MACS     (00)   0x12f,0x12f,0x130,0x121    ||   		macs	OUT,OUT,tmp2,GAIN
+	endm
+
+	
+	macs out_tmp,C_0,C_0,C_0
+	BPF  out_tmp,in,dly0,c0,scalein,scaleout,C_nmax,F_100Hz
+	BPF  out_tmp,in,dly1,c1,scalein+1,scaleout+1,C_nmax,F_316Hz
+                                                   ||   	endm
+
+	
+	macs out_tmp,C_0,C_0,C_0
+	BPF  out_tmp,in,dly0,c0,scalein,scaleout,C_nmax,F_100Hz
+	BPF  out_tmp,in,dly1,c1,scalein+1,scaleout+1,C_nmax,F_316Hz
+                                                   ||   	BPF  out_tmp,in,dly1,c1,scalein+1,scaleout+1,C_nmax,F_316Hz
+                                                   ||   
+		macs  tmp,C_0,SCALEIN,IN
+		macs1  tmp,tmp,DELAY,FOO
+ 		macw1  tmp,tmp,DELAY,COEF
+		macw1 tmp,tmp,DELAY+1,COEF+1
+		macs	tmp2,C_0,DELAY+1,COEF+3
+		macs	DELAY+1,DELAY,C_0,C_0
+		macs	tmp2,tmp2,tmp,COEF+2
+		macs	DELAY,tmp,C_0,C_0	
+		macints  tmp2,C_0,tmp2,SCALEOUT
+		macs	OUT,OUT,tmp2,GAIN
+	endm
+
+	
+	macs out_tmp,C_0,C_0,C_0
+	BPF  out_tmp,in,dly0,c0,scalein,scaleout,C_nmax,F_100Hz
+	BPF  out_tmp,in,dly1,c1,scalein+1,scaleout+1,C_nmax,F_316Hz
+	BPF  out_tmp,in,dly2,c2,scalein+2,scaleout+2,C_nmax,F_1000Hz
+0x02a   MACS     (00)   0x131,0x040,0x116,0x11e    ||   		macs  tmp,C_0,SCALEIN,IN
+		macs1  tmp,tmp,DELAY,FOO
+ 		macw1  tmp,tmp,DELAY,COEF
+		macw1 tmp,tmp,DELAY+1,COEF+1
+		macs	tmp2,C_0,DELAY+1,COEF+3
+		macs	DELAY+1,DELAY,C_0,C_0
+		macs	tmp2,tmp2,tmp,COEF+2
+		macs	DELAY,tmp,C_0,C_0	
+		macints  tmp2,C_0,tmp2,SCALEOUT
+		macs	OUT,OUT,tmp2,GAIN
+	endm
+
+	
+	macs out_tmp,C_0,C_0,C_0
+	BPF  out_tmp,in,dly0,c0,scalein,scaleout,C_nmax,F_100Hz
+	BPF  out_tmp,in,dly1,c1,scalein+1,scaleout+1,C_nmax,F_316Hz
+	BPF  out_tmp,in,dly2,c2,scalein+2,scaleout+2,C_nmax,F_1000Hz
+0x02c   MACS1    (01)   0x131,0x131,0x129,0x04e    ||   		macs1  tmp,tmp,DELAY,FOO
+ 		macw1  tmp,tmp,DELAY,COEF
+		macw1 tmp,tmp,DELAY+1,COEF+1
+		macs	tmp2,C_0,DELAY+1,COEF+3
+		macs	DELAY+1,DELAY,C_0,C_0
+		macs	tmp2,tmp2,tmp,COEF+2
+		macs	DELAY,tmp,C_0,C_0	
+		macints  tmp2,C_0,tmp2,SCALEOUT
+		macs	OUT,OUT,tmp2,GAIN
+	endm
+
+	
+	macs out_tmp,C_0,C_0,C_0
+	BPF  out_tmp,in,dly0,c0,scalein,scaleout,C_nmax,F_100Hz
+	BPF  out_tmp,in,dly1,c1,scalein+1,scaleout+1,C_nmax,F_316Hz
+	BPF  out_tmp,in,dly2,c2,scalein+2,scaleout+2,C_nmax,F_1000Hz
+0x02e   MACW1    (03)   0x131,0x131,0x129,0x108    ||    		macw1  tmp,tmp,DELAY,COEF
+		macw1 tmp,tmp,DELAY+1,COEF+1
+		macs	tmp2,C_0,DELAY+1,COEF+3
+		macs	DELAY+1,DELAY,C_0,C_0
+		macs	tmp2,tmp2,tmp,COEF+2
+		macs	DELAY,tmp,C_0,C_0	
+		macints  tmp2,C_0,tmp2,SCALEOUT
+		macs	OUT,OUT,tmp2,GAIN
+	endm
+
+	
+	macs out_tmp,C_0,C_0,C_0
+	BPF  out_tmp,in,dly0,c0,scalein,scaleout,C_nmax,F_100Hz
+	BPF  out_tmp,in,dly1,c1,scalein+1,scaleout+1,C_nmax,F_316Hz
+	BPF  out_tmp,in,dly2,c2,scalein+2,scaleout+2,C_nmax,F_1000Hz
+0x030   MACW1    (03)   0x131,0x131,0x12a,0x109    ||   		macw1 tmp,tmp,DELAY+1,COEF+1
+		macs	tmp2,C_0,DELAY+1,COEF+3
+		macs	DELAY+1,DELAY,C_0,C_0
+		macs	tmp2,tmp2,tmp,COEF+2
+		macs	DELAY,tmp,C_0,C_0	
+		macints  tmp2,C_0,tmp2,SCALEOUT
+		macs	OUT,OUT,tmp2,GAIN
+	endm
+
+	
+	macs out_tmp,C_0,C_0,C_0
+	BPF  out_tmp,in,dly0,c0,scalein,scaleout,C_nmax,F_100Hz
+	BPF  out_tmp,in,dly1,c1,scalein+1,scaleout+1,C_nmax,F_316Hz
+	BPF  out_tmp,in,dly2,c2,scalein+2,scaleout+2,C_nmax,F_1000Hz
+0x032   MACS     (00)   0x130,0x040,0x12a,0x10b    ||   		macs	tmp2,C_0,DELAY+1,COEF+3
+		macs	DELAY+1,DELAY,C_0,C_0
+		macs	tmp2,tmp2,tmp,COEF+2
+		macs	DELAY,tmp,C_0,C_0	
+		macints  tmp2,C_0,tmp2,SCALEOUT
+		macs	OUT,OUT,tmp2,GAIN
+	endm
+
+	
+	macs out_tmp,C_0,C_0,C_0
+	BPF  out_tmp,in,dly0,c0,scalein,scaleout,C_nmax,F_100Hz
+	BPF  out_tmp,in,dly1,c1,scalein+1,scaleout+1,C_nmax,F_316Hz
+	BPF  out_tmp,in,dly2,c2,scalein+2,scaleout+2,C_nmax,F_1000Hz
+0x034   MACS     (00)   0x12a,0x129,0x040,0x040    ||   		macs	DELAY+1,DELAY,C_0,C_0
+		macs	tmp2,tmp2,tmp,COEF+2
+		macs	DELAY,tmp,C_0,C_0	
+		macints  tmp2,C_0,tmp2,SCALEOUT
+		macs	OUT,OUT,tmp2,GAIN
+	endm
+
+	
+	macs out_tmp,C_0,C_0,C_0
+	BPF  out_tmp,in,dly0,c0,scalein,scaleout,C_nmax,F_100Hz
+	BPF  out_tmp,in,dly1,c1,scalein+1,scaleout+1,C_nmax,F_316Hz
+	BPF  out_tmp,in,dly2,c2,scalein+2,scaleout+2,C_nmax,F_1000Hz
+0x036   MACS     (00)   0x130,0x130,0x131,0x10a    ||   		macs	tmp2,tmp2,tmp,COEF+2
+		macs	DELAY,tmp,C_0,C_0	
+		macints  tmp2,C_0,tmp2,SCALEOUT
+		macs	OUT,OUT,tmp2,GAIN
+	endm
+
+	
+	macs out_tmp,C_0,C_0,C_0
+	BPF  out_tmp,in,dly0,c0,scalein,scaleout,C_nmax,F_100Hz
+	BPF  out_tmp,in,dly1,c1,scalein+1,scaleout+1,C_nmax,F_316Hz
+	BPF  out_tmp,in,dly2,c2,scalein+2,scaleout+2,C_nmax,F_1000Hz
+0x038   MACS     (00)   0x129,0x131,0x040,0x040    ||   		macs	DELAY,tmp,C_0,C_0	
+		macints  tmp2,C_0,tmp2,SCALEOUT
+		macs	OUT,OUT,tmp2,GAIN
+	endm
+
+	
+	macs out_tmp,C_0,C_0,C_0
+	BPF  out_tmp,in,dly0,c0,scalein,scaleout,C_nmax,F_100Hz
+	BPF  out_tmp,in,dly1,c1,scalein+1,scaleout+1,C_nmax,F_316Hz
+	BPF  out_tmp,in,dly2,c2,scalein+2,scaleout+2,C_nmax,F_1000Hz
+0x03a   MACINTS  (04)   0x130,0x040,0x130,0x11b    ||   		macints  tmp2,C_0,tmp2,SCALEOUT
+		macs	OUT,OUT,tmp2,GAIN
+	endm
+
+	
+	macs out_tmp,C_0,C_0,C_0
+	BPF  out_tmp,in,dly0,c0,scalein,scaleout,C_nmax,F_100Hz
+	BPF  out_tmp,in,dly1,c1,scalein+1,scaleout+1,C_nmax,F_316Hz
+	BPF  out_tmp,in,dly2,c2,scalein+2,scaleout+2,C_nmax,F_1000Hz
+0x03c   MACS     (00)   0x12f,0x12f,0x130,0x122    ||   		macs	OUT,OUT,tmp2,GAIN
+	endm
+
+	
+	macs out_tmp,C_0,C_0,C_0
+	BPF  out_tmp,in,dly0,c0,scalein,scaleout,C_nmax,F_100Hz
+	BPF  out_tmp,in,dly1,c1,scalein+1,scaleout+1,C_nmax,F_316Hz
+	BPF  out_tmp,in,dly2,c2,scalein+2,scaleout+2,C_nmax,F_1000Hz
+                                                   ||   	endm
+
+	
+	macs out_tmp,C_0,C_0,C_0
+	BPF  out_tmp,in,dly0,c0,scalein,scaleout,C_nmax,F_100Hz
+	BPF  out_tmp,in,dly1,c1,scalein+1,scaleout+1,C_nmax,F_316Hz
+	BPF  out_tmp,in,dly2,c2,scalein+2,scaleout+2,C_nmax,F_1000Hz
+                                                   ||   	BPF  out_tmp,in,dly2,c2,scalein+2,scaleout+2,C_nmax,F_1000Hz
+                                                   ||   
+		macs  tmp,C_0,SCALEIN,IN
+		macs1  tmp,tmp,DELAY,FOO
+ 		macw1  tmp,tmp,DELAY,COEF
+		macw1 tmp,tmp,DELAY+1,COEF+1
+		macs	tmp2,C_0,DELAY+1,COEF+3
+		macs	DELAY+1,DELAY,C_0,C_0
+		macs	tmp2,tmp2,tmp,COEF+2
+		macs	DELAY,tmp,C_0,C_0	
+		macints  tmp2,C_0,tmp2,SCALEOUT
+		macs	OUT,OUT,tmp2,GAIN
+	endm
+
+	
+	macs out_tmp,C_0,C_0,C_0
+	BPF  out_tmp,in,dly0,c0,scalein,scaleout,C_nmax,F_100Hz
+	BPF  out_tmp,in,dly1,c1,scalein+1,scaleout+1,C_nmax,F_316Hz
+	BPF  out_tmp,in,dly2,c2,scalein+2,scaleout+2,C_nmax,F_1000Hz
+	BPF  out_tmp,in,dly3,c3,scalein+3,scaleout+3,C_nmax,F_3160Hz
+0x03e   MACS     (00)   0x131,0x040,0x117,0x11e    ||   		macs  tmp,C_0,SCALEIN,IN
+		macs1  tmp,tmp,DELAY,FOO
+ 		macw1  tmp,tmp,DELAY,COEF
+		macw1 tmp,tmp,DELAY+1,COEF+1
+		macs	tmp2,C_0,DELAY+1,COEF+3
+		macs	DELAY+1,DELAY,C_0,C_0
+		macs	tmp2,tmp2,tmp,COEF+2
+		macs	DELAY,tmp,C_0,C_0	
+		macints  tmp2,C_0,tmp2,SCALEOUT
+		macs	OUT,OUT,tmp2,GAIN
+	endm
+
+	
+	macs out_tmp,C_0,C_0,C_0
+	BPF  out_tmp,in,dly0,c0,scalein,scaleout,C_nmax,F_100Hz
+	BPF  out_tmp,in,dly1,c1,scalein+1,scaleout+1,C_nmax,F_316Hz
+	BPF  out_tmp,in,dly2,c2,scalein+2,scaleout+2,C_nmax,F_1000Hz
+	BPF  out_tmp,in,dly3,c3,scalein+3,scaleout+3,C_nmax,F_3160Hz
+0x040   MACS1    (01)   0x131,0x131,0x12b,0x04e    ||   		macs1  tmp,tmp,DELAY,FOO
+ 		macw1  tmp,tmp,DELAY,COEF
+		macw1 tmp,tmp,DELAY+1,COEF+1
+		macs	tmp2,C_0,DELAY+1,COEF+3
+		macs	DELAY+1,DELAY,C_0,C_0
+		macs	tmp2,tmp2,tmp,COEF+2
+		macs	DELAY,tmp,C_0,C_0	
+		macints  tmp2,C_0,tmp2,SCALEOUT
+		macs	OUT,OUT,tmp2,GAIN
+	endm
+
+	
+	macs out_tmp,C_0,C_0,C_0
+	BPF  out_tmp,in,dly0,c0,scalein,scaleout,C_nmax,F_100Hz
+	BPF  out_tmp,in,dly1,c1,scalein+1,scaleout+1,C_nmax,F_316Hz
+	BPF  out_tmp,in,dly2,c2,scalein+2,scaleout+2,C_nmax,F_1000Hz
+	BPF  out_tmp,in,dly3,c3,scalein+3,scaleout+3,C_nmax,F_3160Hz
+0x042   MACW1    (03)   0x131,0x131,0x12b,0x10c    ||    		macw1  tmp,tmp,DELAY,COEF
+		macw1 tmp,tmp,DELAY+1,COEF+1
+		macs	tmp2,C_0,DELAY+1,COEF+3
+		macs	DELAY+1,DELAY,C_0,C_0
+		macs	tmp2,tmp2,tmp,COEF+2
+		macs	DELAY,tmp,C_0,C_0	
+		macints  tmp2,C_0,tmp2,SCALEOUT
+		macs	OUT,OUT,tmp2,GAIN
+	endm
+
+	
+	macs out_tmp,C_0,C_0,C_0
+	BPF  out_tmp,in,dly0,c0,scalein,scaleout,C_nmax,F_100Hz
+	BPF  out_tmp,in,dly1,c1,scalein+1,scaleout+1,C_nmax,F_316Hz
+	BPF  out_tmp,in,dly2,c2,scalein+2,scaleout+2,C_nmax,F_1000Hz
+	BPF  out_tmp,in,dly3,c3,scalein+3,scaleout+3,C_nmax,F_3160Hz
+0x044   MACW1    (03)   0x131,0x131,0x12c,0x10d    ||   		macw1 tmp,tmp,DELAY+1,COEF+1
+		macs	tmp2,C_0,DELAY+1,COEF+3
+		macs	DELAY+1,DELAY,C_0,C_0
+		macs	tmp2,tmp2,tmp,COEF+2
+		macs	DELAY,tmp,C_0,C_0	
+		macints  tmp2,C_0,tmp2,SCALEOUT
+		macs	OUT,OUT,tmp2,GAIN
+	endm
+
+	
+	macs out_tmp,C_0,C_0,C_0
+	BPF  out_tmp,in,dly0,c0,scalein,scaleout,C_nmax,F_100Hz
+	BPF  out_tmp,in,dly1,c1,scalein+1,scaleout+1,C_nmax,F_316Hz
+	BPF  out_tmp,in,dly2,c2,scalein+2,scaleout+2,C_nmax,F_1000Hz
+	BPF  out_tmp,in,dly3,c3,scalein+3,scaleout+3,C_nmax,F_3160Hz
+0x046   MACS     (00)   0x130,0x040,0x12c,0x10f    ||   		macs	tmp2,C_0,DELAY+1,COEF+3
+		macs	DELAY+1,DELAY,C_0,C_0
+		macs	tmp2,tmp2,tmp,COEF+2
+		macs	DELAY,tmp,C_0,C_0	
+		macints  tmp2,C_0,tmp2,SCALEOUT
+		macs	OUT,OUT,tmp2,GAIN
+	endm
+
+	
+	macs out_tmp,C_0,C_0,C_0
+	BPF  out_tmp,in,dly0,c0,scalein,scaleout,C_nmax,F_100Hz
+	BPF  out_tmp,in,dly1,c1,scalein+1,scaleout+1,C_nmax,F_316Hz
+	BPF  out_tmp,in,dly2,c2,scalein+2,scaleout+2,C_nmax,F_1000Hz
+	BPF  out_tmp,in,dly3,c3,scalein+3,scaleout+3,C_nmax,F_3160Hz
+0x048   MACS     (00)   0x12c,0x12b,0x040,0x040    ||   		macs	DELAY+1,DELAY,C_0,C_0
+		macs	tmp2,tmp2,tmp,COEF+2
+		macs	DELAY,tmp,C_0,C_0	
+		macints  tmp2,C_0,tmp2,SCALEOUT
+		macs	OUT,OUT,tmp2,GAIN
+	endm
+
+	
+	macs out_tmp,C_0,C_0,C_0
+	BPF  out_tmp,in,dly0,c0,scalein,scaleout,C_nmax,F_100Hz
+	BPF  out_tmp,in,dly1,c1,scalein+1,scaleout+1,C_nmax,F_316Hz
+	BPF  out_tmp,in,dly2,c2,scalein+2,scaleout+2,C_nmax,F_1000Hz
+	BPF  out_tmp,in,dly3,c3,scalein+3,scaleout+3,C_nmax,F_3160Hz
+0x04a   MACS     (00)   0x130,0x130,0x131,0x10e    ||   		macs	tmp2,tmp2,tmp,COEF+2
+		macs	DELAY,tmp,C_0,C_0	
+		macints  tmp2,C_0,tmp2,SCALEOUT
+		macs	OUT,OUT,tmp2,GAIN
+	endm
+
+	
+	macs out_tmp,C_0,C_0,C_0
+	BPF  out_tmp,in,dly0,c0,scalein,scaleout,C_nmax,F_100Hz
+	BPF  out_tmp,in,dly1,c1,scalein+1,scaleout+1,C_nmax,F_316Hz
+	BPF  out_tmp,in,dly2,c2,scalein+2,scaleout+2,C_nmax,F_1000Hz
+	BPF  out_tmp,in,dly3,c3,scalein+3,scaleout+3,C_nmax,F_3160Hz
+0x04c   MACS     (00)   0x12b,0x131,0x040,0x040    ||   		macs	DELAY,tmp,C_0,C_0	
+		macints  tmp2,C_0,tmp2,SCALEOUT
+		macs	OUT,OUT,tmp2,GAIN
+	endm
+
+	
+	macs out_tmp,C_0,C_0,C_0
+	BPF  out_tmp,in,dly0,c0,scalein,scaleout,C_nmax,F_100Hz
+	BPF  out_tmp,in,dly1,c1,scalein+1,scaleout+1,C_nmax,F_316Hz
+	BPF  out_tmp,in,dly2,c2,scalein+2,scaleout+2,C_nmax,F_1000Hz
+	BPF  out_tmp,in,dly3,c3,scalein+3,scaleout+3,C_nmax,F_3160Hz
+0x04e   MACINTS  (04)   0x130,0x040,0x130,0x11c    ||   		macints  tmp2,C_0,tmp2,SCALEOUT
+		macs	OUT,OUT,tmp2,GAIN
+	endm
+
+	
+	macs out_tmp,C_0,C_0,C_0
+	BPF  out_tmp,in,dly0,c0,scalein,scaleout,C_nmax,F_100Hz
+	BPF  out_tmp,in,dly1,c1,scalein+1,scaleout+1,C_nmax,F_316Hz
+	BPF  out_tmp,in,dly2,c2,scalein+2,scaleout+2,C_nmax,F_1000Hz
+	BPF  out_tmp,in,dly3,c3,scalein+3,scaleout+3,C_nmax,F_3160Hz
+0x050   MACS     (00)   0x12f,0x12f,0x130,0x123    ||   		macs	OUT,OUT,tmp2,GAIN
+	endm
+
+	
+	macs out_tmp,C_0,C_0,C_0
+	BPF  out_tmp,in,dly0,c0,scalein,scaleout,C_nmax,F_100Hz
+	BPF  out_tmp,in,dly1,c1,scalein+1,scaleout+1,C_nmax,F_316Hz
+	BPF  out_tmp,in,dly2,c2,scalein+2,scaleout+2,C_nmax,F_1000Hz
+	BPF  out_tmp,in,dly3,c3,scalein+3,scaleout+3,C_nmax,F_3160Hz
+                                                   ||   	endm
+
+	
+	macs out_tmp,C_0,C_0,C_0
+	BPF  out_tmp,in,dly0,c0,scalein,scaleout,C_nmax,F_100Hz
+	BPF  out_tmp,in,dly1,c1,scalein+1,scaleout+1,C_nmax,F_316Hz
+	BPF  out_tmp,in,dly2,c2,scalein+2,scaleout+2,C_nmax,F_1000Hz
+	BPF  out_tmp,in,dly3,c3,scalein+3,scaleout+3,C_nmax,F_3160Hz
+                                                   ||   	BPF  out_tmp,in,dly3,c3,scalein+3,scaleout+3,C_nmax,F_3160Hz
+                                                   ||   
+		macs  tmp,C_0,SCALEIN,IN
+		macs1  tmp,tmp,DELAY,FOO
+ 		macw1  tmp,tmp,DELAY,COEF
+		macw1 tmp,tmp,DELAY+1,COEF+1
+		macs	tmp2,C_0,DELAY+1,COEF+3
+		macs	DELAY+1,DELAY,C_0,C_0
+		macs	tmp2,tmp2,tmp,COEF+2
+		macs	DELAY,tmp,C_0,C_0	
+		macints  tmp2,C_0,tmp2,SCALEOUT
+		macs	OUT,OUT,tmp2,GAIN
+	endm
+
+	
+	macs out_tmp,C_0,C_0,C_0
+	BPF  out_tmp,in,dly0,c0,scalein,scaleout,C_nmax,F_100Hz
+	BPF  out_tmp,in,dly1,c1,scalein+1,scaleout+1,C_nmax,F_316Hz
+	BPF  out_tmp,in,dly2,c2,scalein+2,scaleout+2,C_nmax,F_1000Hz
+	BPF  out_tmp,in,dly3,c3,scalein+3,scaleout+3,C_nmax,F_3160Hz
+	BPF  out_tmp,in,dly4,c4,scalein+4,scaleout+4,C_0,F_10000Hz
+0x052   MACS     (00)   0x131,0x040,0x118,0x11e    ||   		macs  tmp,C_0,SCALEIN,IN
+		macs1  tmp,tmp,DELAY,FOO
+ 		macw1  tmp,tmp,DELAY,COEF
+		macw1 tmp,tmp,DELAY+1,COEF+1
+		macs	tmp2,C_0,DELAY+1,COEF+3
+		macs	DELAY+1,DELAY,C_0,C_0
+		macs	tmp2,tmp2,tmp,COEF+2
+		macs	DELAY,tmp,C_0,C_0	
+		macints  tmp2,C_0,tmp2,SCALEOUT
+		macs	OUT,OUT,tmp2,GAIN
+	endm
+
+	
+	macs out_tmp,C_0,C_0,C_0
+	BPF  out_tmp,in,dly0,c0,scalein,scaleout,C_nmax,F_100Hz
+	BPF  out_tmp,in,dly1,c1,scalein+1,scaleout+1,C_nmax,F_316Hz
+	BPF  out_tmp,in,dly2,c2,scalein+2,scaleout+2,C_nmax,F_1000Hz
+	BPF  out_tmp,in,dly3,c3,scalein+3,scaleout+3,C_nmax,F_3160Hz
+	BPF  out_tmp,in,dly4,c4,scalein+4,scaleout+4,C_0,F_10000Hz
+0x054   MACS1    (01)   0x131,0x131,0x12d,0x040    ||   		macs1  tmp,tmp,DELAY,FOO
+ 		macw1  tmp,tmp,DELAY,COEF
+		macw1 tmp,tmp,DELAY+1,COEF+1
+		macs	tmp2,C_0,DELAY+1,COEF+3
+		macs	DELAY+1,DELAY,C_0,C_0
+		macs	tmp2,tmp2,tmp,COEF+2
+		macs	DELAY,tmp,C_0,C_0	
+		macints  tmp2,C_0,tmp2,SCALEOUT
+		macs	OUT,OUT,tmp2,GAIN
+	endm
+
+	
+	macs out_tmp,C_0,C_0,C_0
+	BPF  out_tmp,in,dly0,c0,scalein,scaleout,C_nmax,F_100Hz
+	BPF  out_tmp,in,dly1,c1,scalein+1,scaleout+1,C_nmax,F_316Hz
+	BPF  out_tmp,in,dly2,c2,scalein+2,scaleout+2,C_nmax,F_1000Hz
+	BPF  out_tmp,in,dly3,c3,scalein+3,scaleout+3,C_nmax,F_3160Hz
+	BPF  out_tmp,in,dly4,c4,scalein+4,scaleout+4,C_0,F_10000Hz
+0x056   MACW1    (03)   0x131,0x131,0x12d,0x110    ||    		macw1  tmp,tmp,DELAY,COEF
+		macw1 tmp,tmp,DELAY+1,COEF+1
+		macs	tmp2,C_0,DELAY+1,COEF+3
+		macs	DELAY+1,DELAY,C_0,C_0
+		macs	tmp2,tmp2,tmp,COEF+2
+		macs	DELAY,tmp,C_0,C_0	
+		macints  tmp2,C_0,tmp2,SCALEOUT
+		macs	OUT,OUT,tmp2,GAIN
+	endm
+
+	
+	macs out_tmp,C_0,C_0,C_0
+	BPF  out_tmp,in,dly0,c0,scalein,scaleout,C_nmax,F_100Hz
+	BPF  out_tmp,in,dly1,c1,scalein+1,scaleout+1,C_nmax,F_316Hz
+	BPF  out_tmp,in,dly2,c2,scalein+2,scaleout+2,C_nmax,F_1000Hz
+	BPF  out_tmp,in,dly3,c3,scalein+3,scaleout+3,C_nmax,F_3160Hz
+	BPF  out_tmp,in,dly4,c4,scalein+4,scaleout+4,C_0,F_10000Hz
+0x058   MACW1    (03)   0x131,0x131,0x12e,0x111    ||   		macw1 tmp,tmp,DELAY+1,COEF+1
+		macs	tmp2,C_0,DELAY+1,COEF+3
+		macs	DELAY+1,DELAY,C_0,C_0
+		macs	tmp2,tmp2,tmp,COEF+2
+		macs	DELAY,tmp,C_0,C_0	
+		macints  tmp2,C_0,tmp2,SCALEOUT
+		macs	OUT,OUT,tmp2,GAIN
+	endm
+
+	
+	macs out_tmp,C_0,C_0,C_0
+	BPF  out_tmp,in,dly0,c0,scalein,scaleout,C_nmax,F_100Hz
+	BPF  out_tmp,in,dly1,c1,scalein+1,scaleout+1,C_nmax,F_316Hz
+	BPF  out_tmp,in,dly2,c2,scalein+2,scaleout+2,C_nmax,F_1000Hz
+	BPF  out_tmp,in,dly3,c3,scalein+3,scaleout+3,C_nmax,F_3160Hz
+	BPF  out_tmp,in,dly4,c4,scalein+4,scaleout+4,C_0,F_10000Hz
+0x05a   MACS     (00)   0x130,0x040,0x12e,0x113    ||   		macs	tmp2,C_0,DELAY+1,COEF+3
+		macs	DELAY+1,DELAY,C_0,C_0
+		macs	tmp2,tmp2,tmp,COEF+2
+		macs	DELAY,tmp,C_0,C_0	
+		macints  tmp2,C_0,tmp2,SCALEOUT
+		macs	OUT,OUT,tmp2,GAIN
+	endm
+
+	
+	macs out_tmp,C_0,C_0,C_0
+	BPF  out_tmp,in,dly0,c0,scalein,scaleout,C_nmax,F_100Hz
+	BPF  out_tmp,in,dly1,c1,scalein+1,scaleout+1,C_nmax,F_316Hz
+	BPF  out_tmp,in,dly2,c2,scalein+2,scaleout+2,C_nmax,F_1000Hz
+	BPF  out_tmp,in,dly3,c3,scalein+3,scaleout+3,C_nmax,F_3160Hz
+	BPF  out_tmp,in,dly4,c4,scalein+4,scaleout+4,C_0,F_10000Hz
+0x05c   MACS     (00)   0x12e,0x12d,0x040,0x040    ||   		macs	DELAY+1,DELAY,C_0,C_0
+		macs	tmp2,tmp2,tmp,COEF+2
+		macs	DELAY,tmp,C_0,C_0	
+		macints  tmp2,C_0,tmp2,SCALEOUT
+		macs	OUT,OUT,tmp2,GAIN
+	endm
+
+	
+	macs out_tmp,C_0,C_0,C_0
+	BPF  out_tmp,in,dly0,c0,scalein,scaleout,C_nmax,F_100Hz
+	BPF  out_tmp,in,dly1,c1,scalein+1,scaleout+1,C_nmax,F_316Hz
+	BPF  out_tmp,in,dly2,c2,scalein+2,scaleout+2,C_nmax,F_1000Hz
+	BPF  out_tmp,in,dly3,c3,scalein+3,scaleout+3,C_nmax,F_3160Hz
+	BPF  out_tmp,in,dly4,c4,scalein+4,scaleout+4,C_0,F_10000Hz
+0x05e   MACS     (00)   0x130,0x130,0x131,0x112    ||   		macs	tmp2,tmp2,tmp,COEF+2
+		macs	DELAY,tmp,C_0,C_0	
+		macints  tmp2,C_0,tmp2,SCALEOUT
+		macs	OUT,OUT,tmp2,GAIN
+	endm
+
+	
+	macs out_tmp,C_0,C_0,C_0
+	BPF  out_tmp,in,dly0,c0,scalein,scaleout,C_nmax,F_100Hz
+	BPF  out_tmp,in,dly1,c1,scalein+1,scaleout+1,C_nmax,F_316Hz
+	BPF  out_tmp,in,dly2,c2,scalein+2,scaleout+2,C_nmax,F_1000Hz
+	BPF  out_tmp,in,dly3,c3,scalein+3,scaleout+3,C_nmax,F_3160Hz
+	BPF  out_tmp,in,dly4,c4,scalein+4,scaleout+4,C_0,F_10000Hz
+0x060   MACS     (00)   0x12d,0x131,0x040,0x040    ||   		macs	DELAY,tmp,C_0,C_0	
+		macints  tmp2,C_0,tmp2,SCALEOUT
+		macs	OUT,OUT,tmp2,GAIN
+	endm
+
+	
+	macs out_tmp,C_0,C_0,C_0
+	BPF  out_tmp,in,dly0,c0,scalein,scaleout,C_nmax,F_100Hz
+	BPF  out_tmp,in,dly1,c1,scalein+1,scaleout+1,C_nmax,F_316Hz
+	BPF  out_tmp,in,dly2,c2,scalein+2,scaleout+2,C_nmax,F_1000Hz
+	BPF  out_tmp,in,dly3,c3,scalein+3,scaleout+3,C_nmax,F_3160Hz
+	BPF  out_tmp,in,dly4,c4,scalein+4,scaleout+4,C_0,F_10000Hz
+0x062   MACINTS  (04)   0x130,0x040,0x130,0x11d    ||   		macints  tmp2,C_0,tmp2,SCALEOUT
+		macs	OUT,OUT,tmp2,GAIN
+	endm
+
+	
+	macs out_tmp,C_0,C_0,C_0
+	BPF  out_tmp,in,dly0,c0,scalein,scaleout,C_nmax,F_100Hz
+	BPF  out_tmp,in,dly1,c1,scalein+1,scaleout+1,C_nmax,F_316Hz
+	BPF  out_tmp,in,dly2,c2,scalein+2,scaleout+2,C_nmax,F_1000Hz
+	BPF  out_tmp,in,dly3,c3,scalein+3,scaleout+3,C_nmax,F_3160Hz
+	BPF  out_tmp,in,dly4,c4,scalein+4,scaleout+4,C_0,F_10000Hz
+0x064   MACS     (00)   0x12f,0x12f,0x130,0x124    ||   		macs	OUT,OUT,tmp2,GAIN
+	endm
+
+	
+	macs out_tmp,C_0,C_0,C_0
+	BPF  out_tmp,in,dly0,c0,scalein,scaleout,C_nmax,F_100Hz
+	BPF  out_tmp,in,dly1,c1,scalein+1,scaleout+1,C_nmax,F_316Hz
+	BPF  out_tmp,in,dly2,c2,scalein+2,scaleout+2,C_nmax,F_1000Hz
+	BPF  out_tmp,in,dly3,c3,scalein+3,scaleout+3,C_nmax,F_3160Hz
+	BPF  out_tmp,in,dly4,c4,scalein+4,scaleout+4,C_0,F_10000Hz
+                                                   ||   	endm
+
+	
+	macs out_tmp,C_0,C_0,C_0
+	BPF  out_tmp,in,dly0,c0,scalein,scaleout,C_nmax,F_100Hz
+	BPF  out_tmp,in,dly1,c1,scalein+1,scaleout+1,C_nmax,F_316Hz
+	BPF  out_tmp,in,dly2,c2,scalein+2,scaleout+2,C_nmax,F_1000Hz
+	BPF  out_tmp,in,dly3,c3,scalein+3,scaleout+3,C_nmax,F_3160Hz
+	BPF  out_tmp,in,dly4,c4,scalein+4,scaleout+4,C_0,F_10000Hz
+                                                   ||   	BPF  out_tmp,in,dly4,c4,scalein+4,scaleout+4,C_0,F_10000Hz
+0x066   MACS     (00)   0x11f,0x12f,0x040,0x040    ||   	macs out,out_tmp,C_0,C_0
+                                                   ||   
+                                                   ||   	
+                                                   ||   	end
+Summary:
+Patch name: "5 band EQ"
+
+*****************************GPR******************************
+in IN: 0x11e, OUT: 0x11f
+GPR Dynamic:  0x12f(out_tmp)
+GPR Dynamic:  0x130(tmp2)
+GPR Dynamic:  0x131(tmp)
+GPR Static:  0x114(scalein), Value:0x00047a4d
+GPR Static:  0x115(__NO_NAME), Value:0x002c1a3a
+GPR Static:  0x116(__NO_NAME), Value:0x019ec8ed
+GPR Static:  0x117(__NO_NAME), Value:0x0ccccccc
+GPR Static:  0x118(__NO_NAME), Value:0x3fffffff
+GPR Static:  0x119(scaleout), Value:0x000001a4
+GPR Static:  0x11a(__NO_NAME), Value:0x0000008c
+GPR Static:  0x11b(__NO_NAME), Value:0x00000032
+GPR Static:  0x11c(__NO_NAME), Value:0x00000014
+GPR Static:  0x11d(__NO_NAME), Value:0x0000000a
+GPR Static:  0x125(dly0), Value:0x00000000
+GPR Static:  0x126(__NO_NAME), Value:0x00000000
+GPR Static:  0x127(dly1), Value:0x00000000
+GPR Static:  0x128(__NO_NAME), Value:0x00000000
+GPR Static:  0x129(dly2), Value:0x00000000
+GPR Static:  0x12a(__NO_NAME), Value:0x00000000
+GPR Static:  0x12b(dly3), Value:0x00000000
+GPR Static:  0x12c(__NO_NAME), Value:0x00000000
+GPR Static:  0x12d(dly4), Value:0x00000000
+GPR Static:  0x12e(__NO_NAME), Value:0x00000000
+GPR Control: 0x120(F_100Hz), value:0x19999999, Min:0x00000000, Max:0x7fffffff
+GPR Control: 0x121(F_316Hz), value:0x0ccccccc, Min:0x00000000, Max:0x7fffffff
+GPR Control: 0x122(F_1000Hz), value:0x0ccccccc, Min:0x00000000, Max:0x7fffffff
+GPR Control: 0x123(F_3160Hz), value:0x0ccccccc, Min:0x00000000, Max:0x7fffffff
+GPR Control: 0x124(F_10000Hz), value:0x19999999, Min:0x00000000, Max:0x7fffffff
+GPR Constant: 0x100(c0), Value:0x81f03ae8
+GPR Constant: 0x101(__NO_NAME), Value:0x7e1557bf
+GPR Constant: 0x102(__NO_NAME), Value:0x7ec3c3b8
+GPR Constant: 0x103(__NO_NAME), Value:0x813c3c48
+GPR Constant: 0x104(c1), Value:0x862edea7
+GPR Constant: 0x105(__NO_NAME), Value:0x7a08098d
+GPR Constant: 0x106(__NO_NAME), Value:0x782a2557
+GPR Constant: 0x107(__NO_NAME), Value:0x87d5daa9
+GPR Constant: 0x108(c2), Value:0x93ff5b56
+GPR Constant: 0x109(__NO_NAME), Value:0x6e09f9e8
+GPR Constant: 0x10a(__NO_NAME), Value:0x6bbe48ba
+GPR Constant: 0x10b(__NO_NAME), Value:0x9441b746
+GPR Constant: 0x10c(c3), Value:0xc2eaf583
+GPR Constant: 0x10d(__NO_NAME), Value:0x4e8d15d2
+GPR Constant: 0x10e(__NO_NAME), Value:0x5e159009
+GPR Constant: 0x10f(__NO_NAME), Value:0xa1ea6ff7
+GPR Constant: 0x110(c4), Value:0xdae55c11
+GPR Constant: 0x111(__NO_NAME), Value:0x0f5bed7b
+GPR Constant: 0x112(__NO_NAME), Value:0x5d04ca53
+GPR Constant: 0x113(__NO_NAME), Value:0xa2fb35ad
+*****************************TRAM*****************************
