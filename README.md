@@ -4,6 +4,10 @@ SPDX-FileCopyrightText: 2021 Petr Pucil <petr.pucil@seznam.cz>
 SPDX-License-Identifier: CC0-1.0
 -->
 
+**My fork of https://github.com/kaitai-io/kaitai_struct_samples used to be here where in side branches my not yet merged additions to the repo were living. I had to [move from GitHub](https://codeberg.org/KOLANICH/Fuck-GuanTEEnomo) because of its forceful promotion of FIDO specifications by creating issues for users not using them (one has to use either 2FA or a FIDO2 authenticator, such as Windows Hello). It is likely that GitHub won't allow me to use my account since 2023-10-13. Now my fork lives there https://github.com/KOLANICH-datasets/kaitai_struct_samples (if I had to migrate from Codeberg, look for the further references in that repo). It is likely I cannot properly contribute to Kaitai Struct project anymore, since [it seems to be unwilling to leave GitHub](https://github.com/kaitai-io/kaitai_struct/issues/447).**
+
+---
+
 # Kaitai Struct: sample library
 
 [![REUSE compliant](https://github.com/kaitai-io/kaitai_struct_samples/actions/workflows/reuse_lint.yml/badge.svg)](
